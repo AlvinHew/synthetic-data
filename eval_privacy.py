@@ -387,6 +387,7 @@ class DomiasMIABNAF:
         synth_val_set: Union[DataLoader, Any],
         reference_set: np.ndarray,
         X_test: np.ndarray,
+        batch_size: int = 50,
         device: Any = DEVICE,
     ) -> Tuple[np.ndarray, np.ndarray]:
         _, p_G_model = density_estimator_trainer(
@@ -395,7 +396,9 @@ class DomiasMIABNAF:
             synth_val_set.values[int(0.5 * synth_val_set.shape[0]) :],
             device=device,
         )
-        _, p_R_model = density_estimator_trainer(reference_set, device=device)
+        _, p_R_model = density_estimator_trainer(
+            reference_set, batch_dim=batch_size, device=device
+        )
         p_G_evaluated = np.exp(
             compute_log_p_x(p_G_model, torch.as_tensor(X_test).float().to(device))
             .cpu()
