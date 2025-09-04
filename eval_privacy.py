@@ -394,6 +394,7 @@ class DomiasMIABNAF:
             synth_set.values,
             synth_val_set.values[: int(0.5 * synth_val_set.shape[0])],
             synth_val_set.values[int(0.5 * synth_val_set.shape[0]) :],
+            batch_dim=batch_size,
             device=device,
         )
         _, p_R_model = density_estimator_trainer(
