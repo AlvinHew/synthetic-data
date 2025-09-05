@@ -1,14 +1,17 @@
+# https://github.com/vanderschaarlab/synthcity/blob/main/src/synthcity/metrics/eval_privacy.py
+import logging
 from pathlib import Path
 from typing import Any, Callable, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
 import torch.nn as nn
-from absl import logging
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 import bnaf
+
+logger = logging.getLogger(__name__)
 
 DEVICE = "cpu"
 
