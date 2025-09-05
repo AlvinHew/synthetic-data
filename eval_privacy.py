@@ -162,8 +162,10 @@ def train(
     save: bool = False,
     clip_norm: float = 0.1,
 ) -> Callable:
+
     epoch = start_epoch
     for epoch in range(start_epoch, start_epoch + epochs):
+        model.train()
         t = tqdm(data_loader_train, smoothing=0, ncols=80, disable=True)
         # train_loss: torch.Tensor = []
         running_train_loss = 0.0
@@ -175,11 +177,13 @@ def train(
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=clip_norm)
 
             optimizer.step()
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)  # More memory efficient
 
             t.set_postfix(loss="{:.2f}".format(loss.item()), refresh=False)
             # train_loss.append(loss)
             running_train_loss += loss.item()
+
+            del loss, x_mb
 
         # train_loss = torch.stack(train_loss).mean()
         train_loss = running_train_loss / len(data_loader_train)
@@ -191,11 +195,13 @@ def train(
         #     ],
         #     -1,
         # ).mean()
+        model.eval()
         validation_loss = 0.0
         with torch.no_grad():  # Disable gradient calculation
             for (x_mb,) in data_loader_valid:
                 loss = -compute_log_p_x(model, x_mb).mean()
                 validation_loss += loss.item()
+                del loss, x_mb
 
         validation_loss /= len(data_loader_valid)
         optimizer.swap()
@@ -218,10 +224,13 @@ def train(
         )
 
         if stop:
+            logging.debug(f"--- Early stopping triggered at epoch {epoch + 1} ---")
             break
 
+    logging.debug("--- Training finished. Loading best model for final evaluation. ---")
     load_model(model, optimizer, workspace=workspace)()
     optimizer.swap()
+
     # validation_loss = -torch.stack(
     #     [compute_log_p_x(model, x_mb).mean().detach() for x_mb, in data_loader_valid],
     #     -1,
@@ -229,12 +238,13 @@ def train(
     # test_loss = -torch.stack(
     #     [compute_log_p_x(model, x_mb).mean().detach() for x_mb, in data_loader_test], -1
     # ).mean()
-
+    model.eval()
     validation_loss = 0.0
     with torch.no_grad():  # Disable gradient calculation
         for (x_mb,) in data_loader_valid:
             loss = -compute_log_p_x(model, x_mb).mean()
             validation_loss += loss.item()
+            del loss, x_mb
 
     validation_loss /= len(data_loader_valid)
 
@@ -244,14 +254,22 @@ def train(
         for (x_mb,) in data_loader_test:
             loss = -compute_log_p_x(model, x_mb).mean()
             test_loss += loss.item()
+            del loss, x_mb
 
     test_loss /= len(data_loader_test)
 
+    # logging.debug(
+    #     f"""
+    #     ###### Stop training after {epoch + 1} epochs!
+    #     Validation loss: {validation_loss.item():4.3f}
+    #     Test loss:       {test_loss.item():4.3f}
+    #     """
+    # )
     logging.debug(
         f"""
         ###### Stop training after {epoch + 1} epochs!
-        Validation loss: {validation_loss.item():4.3f}
-        Test loss:       {test_loss.item():4.3f}
+        Validation loss: {validation_loss:4.3f}
+        Test loss:       {test_loss:4.3f}
         """
     )
 
@@ -273,7 +291,8 @@ def train(
         )
 
     def p_func(x: np.ndarray) -> np.ndarray:
-        return np.exp(compute_log_p_x(model, x))
+        with torch.no_grad():
+            return np.exp(compute_log_p_x(model, x).cpu().numpy())
 
     return p_func
 
@@ -375,6 +394,9 @@ def compute_log_p_x(model: nn.Module, x_mb: torch.Tensor) -> torch.Tensor:
 
 class DomiasMIABNAF:
     def __init__(self, **kwargs: Any) -> None:
+        self.batch_size = kwargs.pop("batch_size", 50)
+        self.device = kwargs.pop("device", DEVICE)
+        self.epochs = kwargs.pop("epochs", 50)
         super().__init__(**kwargs)
 
     @staticmethod
@@ -387,27 +409,31 @@ class DomiasMIABNAF:
         synth_val_set: Union[DataLoader, Any],
         reference_set: np.ndarray,
         X_test: np.ndarray,
-        batch_size: int = 50,
-        device: Any = DEVICE,
+        # batch_size: int = 50,
+        # device: Any = DEVICE,
     ) -> Tuple[np.ndarray, np.ndarray]:
         _, p_G_model = density_estimator_trainer(
             synth_set.values,
             synth_val_set.values[: int(0.5 * synth_val_set.shape[0])],
             synth_val_set.values[int(0.5 * synth_val_set.shape[0]) :],
-            batch_dim=batch_size,
-            device=device,
+            batch_dim=self.batch_size,
+            device=self.device,
+            epochs=self.epochs,
         )
         _, p_R_model = density_estimator_trainer(
-            reference_set, batch_dim=batch_size, device=device
+            reference_set,
+            batch_dim=self.batch_size,
+            device=self.device,
+            epochs=self.epochs,
         )
         p_G_evaluated = np.exp(
-            compute_log_p_x(p_G_model, torch.as_tensor(X_test).float().to(device))
+            compute_log_p_x(p_G_model, torch.as_tensor(X_test).float().to(self.device))
             .cpu()
             .detach()
             .numpy()
         )
         p_R_evaluated = np.exp(
-            compute_log_p_x(p_R_model, torch.as_tensor(X_test).float().to(device))
+            compute_log_p_x(p_R_model, torch.as_tensor(X_test).float().to(self.device))
             .cpu()
             .detach()
             .numpy()
