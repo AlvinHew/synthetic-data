@@ -285,8 +285,8 @@ def train(
         logging.debug(
             f"""
             ###### Stop training after {epoch + 1} epochs!
-            Validation loss: {validation_loss.item():4.3f}
-            Test loss:       {test_loss.item():4.3f}
+            Validation loss: {validation_loss:4.3f}
+            Test loss:       {test_loss:4.3f}
             """
         )
 
