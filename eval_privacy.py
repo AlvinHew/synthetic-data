@@ -1,4 +1,5 @@
 # https://github.com/vanderschaarlab/synthcity/blob/main/src/synthcity/metrics/eval_privacy.py
+# https://github.com/vanderschaarlab/synthcity/blob/main/src/synthcity/metrics/_utils.py#L471
 import logging
 from pathlib import Path
 from typing import Any, Callable, List, Optional, Tuple, Union
@@ -135,6 +136,7 @@ def save_model(
     model: nn.Module,
     optimizer: Any,
     epoch: int,
+    file_name: str,
     save: bool = False,
     workspace: Path = Path("workspace"),
 ) -> Callable:
@@ -142,14 +144,14 @@ def save_model(
 
     # def f() -> None:
     if save:
-        logger.info("Saving model..")
+        logger.info("Saving model at %s", workspace / file_name)
         torch.save(
             {
                 "model": model.state_dict(),
                 "optimizer": optimizer.state_dict(),
                 "epoch": epoch,
             },
-            workspace / "DomiasMIA_bnaf_checkpoint.pt",
+            workspace / file_name,
         )  # nosec B614
 
     # return f
@@ -236,8 +238,14 @@ def train(
 
         if validation_loss < best_validation_loss:
             best_validation_loss = validation_loss
-            if save:
-                save_model(model, optimizer, epoch + 1)
+            save_model(
+                model,
+                optimizer,
+                epoch + 1,
+                file_name="DomiasMIA_bnaf_checkpoint.pt",
+                save=save,
+                workspace=workspace,
+            )
 
         # 2. Let the scheduler decide to change LR or stop
         # Assumes a scheduler API like `ReduceLROnPlateau`. The `stop` signal
@@ -249,7 +257,7 @@ def train(
 
         # 3. If LR was reduced, load the best model back
         if lr_after < lr_before:
-            load_model(model, optimizer)
+            load_model(model, optimizer, workspace=workspace)  # ()
 
         if stop:
             logger.info("--- Early stopping triggered at epoch %d ---", epoch + 1)
@@ -302,21 +310,23 @@ def train(
         test_loss,
     )
 
-    if save:
-        torch.save(
-            {
-                "model": model.state_dict(),
-                "optimizer": optimizer.state_dict(),
-                "epoch": epoch,
-            },
-            workspace / "checkpoint.pt",
-        )  # nosec B614
-        logger.info(
-            "###### Stop training after %d epochs!\nValidation loss: %.3f\nTest loss: %.3f",
-            epoch + 1,
-            validation_loss,
-            test_loss,
-        )
+    save_model(model, optimizer, epoch, "checkpoint.pt", save)
+
+    # if save:
+    #     torch.save(
+    #         {
+    #             "model": model.state_dict(),
+    #             "optimizer": optimizer.state_dict(),
+    #             "epoch": epoch,
+    #         },
+    #         workspace / "checkpoint.pt",
+    #     )  # nosec B614
+    # logger.info(
+    #     "###### Stop training after %d epochs!\nValidation loss: %.3f\nTest loss: %.3f",
+    #     epoch + 1,
+    #     validation_loss,
+    #     test_loss,
+    # )
 
     def p_func(x: np.ndarray) -> np.ndarray:
         with torch.no_grad():
@@ -432,6 +442,24 @@ class DomiasMIABNAF:
     def name() -> str:
         return "DomiasMIA_BNAF"
 
+    def _compute_log_p_x_in_batches(
+        self, model: nn.Module, data: np.ndarray
+    ) -> np.ndarray:
+        """Helper function to compute log probabilities in batches to save memory."""
+        model.eval()
+        log_p_x_all = []
+        with torch.no_grad():
+            dataset = torch.utils.data.TensorDataset(torch.from_numpy(data).float())
+            dataloader = torch.utils.data.DataLoader(
+                dataset, batch_size=self.batch_size, shuffle=False
+            )
+            for (x_mb,) in dataloader:
+                x_mb = x_mb.to(self.device)
+                log_p_x = compute_log_p_x(model, x_mb)
+                log_p_x_all.append(log_p_x.cpu().numpy())
+                del x_mb, log_p_x
+        return np.concatenate(log_p_x_all)
+
     def evaluate_p_rel(
         self,
         synth_set: Union[DataLoader, Any],
@@ -449,12 +477,13 @@ class DomiasMIABNAF:
             device=self.device,
             epochs=self.epochs,
         )
-        p_G_evaluated = np.exp(
-            compute_log_p_x(p_G_model, torch.as_tensor(X_test).float().to(self.device))
-            .cpu()
-            .detach()
-            .numpy()
-        )
+        # p_G_evaluated = np.exp(
+        #     compute_log_p_x(p_G_model, torch.as_tensor(X_test).float().to(self.device))
+        #     .cpu()
+        #     .detach()
+        #     .numpy()
+        # )
+        p_G_evaluated = np.exp(self._compute_log_p_x_in_batches(p_G_model, X_test))
         del p_G_model
         logger.info("Finished evaluating p_G.")
 
@@ -464,12 +493,13 @@ class DomiasMIABNAF:
             device=self.device,
             epochs=self.epochs,
         )
-        p_R_evaluated = np.exp(
-            compute_log_p_x(p_R_model, torch.as_tensor(X_test).float().to(self.device))
-            .cpu()
-            .detach()
-            .numpy()
-        )
+        # p_R_evaluated = np.exp(
+        #     compute_log_p_x(p_R_model, torch.as_tensor(X_test).float().to(self.device))
+        #     .cpu()
+        #     .detach()
+        #     .numpy()
+        # )
+        p_R_evaluated = np.exp(self._compute_log_p_x_in_batches(p_R_model, X_test))
         del p_R_model
         logger.info("Finished evaluating p_R.")
 
