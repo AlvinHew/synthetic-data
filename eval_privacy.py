@@ -33,10 +33,10 @@ def load_dataset(
             torch.from_numpy(data_train).float().to(device)
         )
         if data_valid is None:
-            logger.debug("No validation set passed")
+            logger.info("No validation set passed")
             data_valid = np.random.randn(*data_train.shape)
         if data_test is None:
-            logger.debug("No test set passed")
+            logger.info("No test set passed")
             data_test = np.random.randn(*data_train.shape)
 
         dataset_valid = torch.utils.data.TensorDataset(
@@ -138,7 +138,7 @@ def save_model(
 
     def f() -> None:
         if save:
-            logger.debug("Saving model..")
+            logger.info("Saving model..")
             torch.save(
                 {
                     "model": model.state_dict(),
@@ -209,7 +209,7 @@ def train(
         validation_loss /= len(data_loader_valid)
         optimizer.swap()
 
-        logger.debug(
+        logger.info(
             "Epoch {:3}/{:3} -- train_loss: {:4.3f} -- validation_loss: {:4.3f}".format(
                 epoch + 1,
                 start_epoch + epochs,
@@ -227,10 +227,10 @@ def train(
         )
 
         if stop:
-            logger.debug(f"--- Early stopping triggered at epoch {epoch + 1} ---")
+            logger.info(f"--- Early stopping triggered at epoch {epoch + 1} ---")
             break
 
-    logger.debug("--- Training finished. Loading best model for final evaluation. ---")
+    logger.info("--- Training finished. Loading best model for final evaluation. ---")
     load_model(model, optimizer, workspace=workspace)()
     optimizer.swap()
 
@@ -261,14 +261,14 @@ def train(
 
     test_loss /= len(data_loader_test)
 
-    # logger.debug(
+    # logger.info(
     #     f"""
     #     ###### Stop training after {epoch + 1} epochs!
     #     Validation loss: {validation_loss.item():4.3f}
     #     Test loss:       {test_loss.item():4.3f}
     #     """
     # )
-    logger.debug(
+    logger.info(
         f"""
         ###### Stop training after {epoch + 1} epochs!
         Validation loss: {validation_loss:4.3f}
@@ -285,7 +285,7 @@ def train(
             },
             workspace / "checkpoint.pt",
         )  # nosec B614
-        logger.debug(
+        logger.info(
             f"""
             ###### Stop training after {epoch + 1} epochs!
             Validation loss: {validation_loss:4.3f}
@@ -323,7 +323,7 @@ def density_estimator_trainer(
     save: bool = True,
     load: bool = True,
 ) -> Tuple[Callable, nn.Module]:
-    logger.debug("Loading dataset..")
+    logger.info("Loading dataset..")
     data_loader_train, data_loader_valid, data_loader_test = load_dataset(
         data_train,
         data_val,
@@ -333,10 +333,10 @@ def density_estimator_trainer(
     )
 
     if save:
-        logger.debug("Creating directory experiment..")
+        logger.info("Creating directory experiment..")
         workspace.mkdir(parents=True, exist_ok=True)
 
-    logger.debug("Creating BNAF model..")
+    logger.info("Creating BNAF model..")
     model = create_model(
         data_train.shape[1],
         batch_dim=batch_dim,
@@ -347,12 +347,12 @@ def density_estimator_trainer(
         device=device,
     )
 
-    logger.debug("Creating optimizer..")
+    logger.info("Creating optimizer..")
     optimizer = bnaf.Adam(
         model.parameters(), lr=learning_rate, amsgrad=True, polyak=polyak
     )
 
-    logger.debug("Creating scheduler..")
+    logger.info("Creating scheduler..")
 
     scheduler = bnaf.ReduceLROnPlateau(
         optimizer,
@@ -368,7 +368,7 @@ def density_estimator_trainer(
     if load:
         load_model(model, optimizer, workspace=workspace)()
 
-    logger.debug("Training..")
+    logger.info("Training..")
     p_func = train(
         model,
         optimizer,
