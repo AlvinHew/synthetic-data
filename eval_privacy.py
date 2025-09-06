@@ -222,10 +222,10 @@ def train(
             t.set_postfix(loss="{:.2f}".format(loss.item()), refresh=False)
             # train_loss.append(loss)
             running_train_loss += loss.item()
-
         # train_loss = torch.stack(train_loss).mean()
         train_loss = running_train_loss / len(data_loader_train)
-        optimizer.swap()
+
+        # optimizer.swap()
         # validation_loss = -torch.stack(
         #     [
         #         compute_log_p_x(model, x_mb).mean().detach()
@@ -233,16 +233,16 @@ def train(
         #     ],
         #     -1,
         # ).mean()
-        model.eval()
-        validation_loss = 0.0
-        with torch.no_grad():  # Disable gradient calculation
+        with torch.no_grad():  # , _EMASwap(optimizer):
+            model.eval()
+            validation_loss = 0.0
             for (x_mb,) in data_loader_valid:
                 x_mb = x_mb.to(device)
                 loss = -compute_log_p_x(model, x_mb).mean()
                 validation_loss += loss.item()
             validation_loss /= len(data_loader_valid)
 
-        optimizer.swap()
+        # optimizer.swap()
 
         # Use lazy formatting, defers string formatting unless the log level is enabled, saving compute and memory
         logger.info(
@@ -294,7 +294,7 @@ def train(
 
     logger.info("--- Training finished. Loading best model for final evaluation. ---")
     load_model(model, optimizer, workspace=workspace)()
-    optimizer.swap()
+    # optimizer.swap()
 
     # validation_loss = -torch.stack(
     #     [compute_log_p_x(model, x_mb).mean().detach() for x_mb, in data_loader_valid],
