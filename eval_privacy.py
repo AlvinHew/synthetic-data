@@ -21,7 +21,7 @@ def load_dataset(
     data_train: Optional[np.ndarray] = None,
     data_valid: Optional[np.ndarray] = None,
     data_test: Optional[np.ndarray] = None,
-    device: Any = DEVICE,
+    # device: Any = DEVICE,
     batch_dim: int = 50,
 ) -> Tuple[
     torch.utils.data.DataLoader,
@@ -30,7 +30,7 @@ def load_dataset(
 ]:
     if data_train is not None:
         dataset_train = torch.utils.data.TensorDataset(
-            torch.from_numpy(data_train).float().to(device)
+            torch.from_numpy(data_train).float()  # .to(device)
         )
         if data_valid is None:
             logger.info("No validation set passed")
@@ -40,11 +40,11 @@ def load_dataset(
             data_test = np.random.randn(*data_train.shape)
 
         dataset_valid = torch.utils.data.TensorDataset(
-            torch.from_numpy(data_valid).float().to(device)
+            torch.from_numpy(data_valid).float()  # .to(device)
         )
 
         dataset_test = torch.utils.data.TensorDataset(
-            torch.from_numpy(data_test).float().to(device)
+            torch.from_numpy(data_test).float()  # .to(device)
         )
     else:
         raise RuntimeError()
@@ -174,6 +174,7 @@ def train(
         running_train_loss = 0.0
 
         for (x_mb,) in t:
+            x_mb = x_mb.to(device)
             loss = -compute_log_p_x(model, x_mb).mean()
 
             loss.backward()
@@ -202,6 +203,7 @@ def train(
         validation_loss = 0.0
         with torch.no_grad():  # Disable gradient calculation
             for (x_mb,) in data_loader_valid:
+                x_mb = x_mb.to(device)
                 loss = -compute_log_p_x(model, x_mb).mean()
                 validation_loss += loss.item()
                 del loss, x_mb
@@ -245,6 +247,7 @@ def train(
     validation_loss = 0.0
     with torch.no_grad():  # Disable gradient calculation
         for (x_mb,) in data_loader_valid:
+            x_mb = x_mb.to(device)
             loss = -compute_log_p_x(model, x_mb).mean()
             validation_loss += loss.item()
             del loss, x_mb
@@ -255,6 +258,7 @@ def train(
     test_loss = 0.0
     with torch.no_grad():
         for (x_mb,) in data_loader_test:
+            x_mb = x_mb.to(device)
             loss = -compute_log_p_x(model, x_mb).mean()
             test_loss += loss.item()
             del loss, x_mb
@@ -328,7 +332,7 @@ def density_estimator_trainer(
         data_train,
         data_val,
         data_test,
-        device=device,
+        # device=device,
         batch_dim=batch_dim,
     )
 
