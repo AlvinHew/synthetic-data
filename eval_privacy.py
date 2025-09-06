@@ -169,7 +169,7 @@ def train(
     epoch = start_epoch
     for epoch in range(start_epoch, start_epoch + epochs):
         model.train()
-        t = tqdm(data_loader_train, smoothing=0, ncols=80, disable=True)
+        t = tqdm(data_loader_train, smoothing=0, ncols=80, disable=False)  # True)
         # train_loss: torch.Tensor = []
         running_train_loss = 0.0
 
@@ -396,6 +396,7 @@ def compute_log_p_x(model: nn.Module, x_mb: torch.Tensor) -> torch.Tensor:
 
 
 class DomiasMIABNAF:
+    # ref: https://github.com/vanderschaarlab/DOMIAS/blob/main/src/domias/evaluator.py#L68
     def __init__(self, **kwargs: Any) -> None:
         self.batch_size = kwargs.pop("batch_size", 50)
         self.device = kwargs.pop("device", DEVICE)
@@ -406,7 +407,7 @@ class DomiasMIABNAF:
     def name() -> str:
         return "DomiasMIA_BNAF"
 
-    def evaluate_p_R(
+    def evaluate_p_rel(
         self,
         synth_set: Union[DataLoader, Any],
         synth_val_set: Union[DataLoader, Any],
@@ -423,17 +424,20 @@ class DomiasMIABNAF:
             device=self.device,
             epochs=self.epochs,
         )
-        _, p_R_model = density_estimator_trainer(
-            reference_set,
-            batch_dim=self.batch_size,
-            device=self.device,
-            epochs=self.epochs,
-        )
         p_G_evaluated = np.exp(
             compute_log_p_x(p_G_model, torch.as_tensor(X_test).float().to(self.device))
             .cpu()
             .detach()
             .numpy()
+        )
+        del p_G_model
+        logger.info("Finished evaluating p_G.")
+
+        _, p_R_model = density_estimator_trainer(
+            reference_set,
+            batch_dim=self.batch_size,
+            device=self.device,
+            epochs=self.epochs,
         )
         p_R_evaluated = np.exp(
             compute_log_p_x(p_R_model, torch.as_tensor(X_test).float().to(self.device))
@@ -441,4 +445,9 @@ class DomiasMIABNAF:
             .detach()
             .numpy()
         )
-        return p_G_evaluated, p_R_evaluated
+        del p_R_model
+        logger.info("Finished evaluating p_R.")
+
+        p_rel = p_G_evaluated / (p_R_evaluated + 1e-10)
+
+        return p_rel
