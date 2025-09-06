@@ -113,48 +113,77 @@ def create_model(
 def load_model(
     model: nn.Module,
     optimizer: Any,
+    file_name: str = "checkpoint.pt",
     workspace: Path = Path("workspace"),
 ) -> Callable:
-    # def f() -> None:
-    if workspace.exists():
-        return
 
-    path = workspace / "checkpoint.pt"
-    logger.info("Loading checkpoint model from ")
+    def f() -> None:
+        if workspace.exists():
+            return
 
-    if path.exists():
-        checkpoint = torch.load(path)  # nosec B614
-        model.load_state_dict(checkpoint["model"])
-        optimizer.load_state_dict(checkpoint["optimizer"])
-    else:
-        logger.warning("No checkpoint found.")
+        path = workspace / file_name
+        logger.info("Loading checkpoint model from ")
 
-    # return f
+        if path.exists():
+            checkpoint = torch.load(path)  # nosec B614
+            model.load_state_dict(checkpoint["model"])
+            optimizer.load_state_dict(checkpoint["optimizer"])
+        else:
+            logger.warning("No checkpoint found.")
+
+    return f
+
+
+# def save_model(
+#     model: nn.Module,
+#     optimizer: Any,
+#     epoch: int,
+#     file_name: str = "checkpoint.pt",
+#     save: bool = False,
+#     workspace: Path = Path("workspace"),
+# ) -> Callable:
+
+#     workspace.mkdir(parents=True, exist_ok=True)
+
+#     def f() -> None:
+#         if save:
+#             logger.info("Saving model at %s", workspace / file_name)
+#             torch.save(
+#                 {
+#                     "model": model.state_dict(),
+#                     "optimizer": optimizer.state_dict(),
+#                     "epoch": epoch,
+#                 },
+#                 workspace / file_name,
+#             )  # nosec B614
+
+#     return f
 
 
 def save_model(
-    model: nn.Module,
-    optimizer: Any,
+    model_state: dict,
+    optimizer_state: dict,
     epoch: int,
-    file_name: str,
+    file_name: str = "checkpoint.pt",
     save: bool = False,
     workspace: Path = Path("workspace"),
 ) -> Callable:
+
     workspace.mkdir(parents=True, exist_ok=True)
 
-    # def f() -> None:
-    if save:
-        logger.info("Saving model at %s", workspace / file_name)
-        torch.save(
-            {
-                "model": model.state_dict(),
-                "optimizer": optimizer.state_dict(),
-                "epoch": epoch,
-            },
-            workspace / file_name,
-        )  # nosec B614
+    def f() -> None:
+        if save:
+            logger.info("Saving model at %s", workspace / file_name)
+            torch.save(
+                {
+                    "model": model_state,
+                    "optimizer": optimizer_state,
+                    "epoch": epoch,
+                },
+                workspace / file_name,
+            )  # nosec B614
 
-    # return f
+    return f
 
 
 def train(
@@ -172,15 +201,14 @@ def train(
     clip_norm: float = 0.1,
 ) -> Callable:
 
-    epoch = start_epoch
-    best_validation_loss = float("inf")
+    # epoch = start_epoch
+    # best_validation_loss = float("inf")
 
     for epoch in range(start_epoch, start_epoch + epochs):
         model.train()
+        running_train_loss = 0.0
         t = tqdm(data_loader_train, smoothing=0, ncols=80, disable=False)  # True)
         # train_loss: torch.Tensor = []
-        running_train_loss = 0.0
-
         for (x_mb,) in t:
             x_mb = x_mb.to(device)
             loss = -compute_log_p_x(model, x_mb).mean()
@@ -194,8 +222,6 @@ def train(
             t.set_postfix(loss="{:.2f}".format(loss.item()), refresh=False)
             # train_loss.append(loss)
             running_train_loss += loss.item()
-
-            del loss, x_mb
 
         # train_loss = torch.stack(train_loss).mean()
         train_loss = running_train_loss / len(data_loader_train)
@@ -214,9 +240,8 @@ def train(
                 x_mb = x_mb.to(device)
                 loss = -compute_log_p_x(model, x_mb).mean()
                 validation_loss += loss.item()
-                del loss, x_mb
+            validation_loss /= len(data_loader_valid)
 
-        validation_loss /= len(data_loader_valid)
         optimizer.swap()
 
         # Use lazy formatting, defers string formatting unless the log level is enabled, saving compute and memory
@@ -228,43 +253,47 @@ def train(
             validation_loss,
         )
 
-        # stop = scheduler.step(
-        #     validation_loss,
-        #     callback_best=save_model(
-        #         model, optimizer, epoch + 1, save=save, workspace=workspace
-        #     ),
-        #     callback_reduce=load_model(model, optimizer, workspace=workspace),
-        # )
-
-        if validation_loss < best_validation_loss:
-            best_validation_loss = validation_loss
-            save_model(
-                model,
-                optimizer,
+        stop = scheduler.step(
+            validation_loss,
+            callback_best=save_model(
+                model.state_dict(),
+                optimizer.state_dict(),
                 epoch + 1,
-                file_name="DomiasMIA_bnaf_checkpoint.pt",
                 save=save,
                 workspace=workspace,
-            )
+            ),
+            callback_reduce=load_model(model, optimizer, workspace=workspace),
+        )
 
-        # 2. Let the scheduler decide to change LR or stop
-        # Assumes a scheduler API like `ReduceLROnPlateau`. The `stop` signal
-        # and `callback_reduce` logic from the original code are now handled here.
-        # The scheduler's only jobs should be to adjust the learning rate and signal when to stop
-        lr_before = optimizer.param_groups[0]["lr"]
-        stop = scheduler.step(validation_loss)  # `step` might return a stop signal
-        lr_after = optimizer.param_groups[0]["lr"]
+        # if validation_loss < best_validation_loss:
+        #     best_validation_loss = validation_loss
+        #     save_model(
+        #         model,
+        #         optimizer,
+        #         epoch + 1,
+        #         file_name="DomiasMIA_bnaf_checkpoint.pt",
+        #         save=save,
+        #         workspace=workspace,
+        #     )
 
-        # 3. If LR was reduced, load the best model back
-        if lr_after < lr_before:
-            load_model(model, optimizer, workspace=workspace)  # ()
+        # # 2. Let the scheduler decide to change LR or stop
+        # # Assumes a scheduler API like `ReduceLROnPlateau`. The `stop` signal
+        # # and `callback_reduce` logic from the original code are now handled here.
+        # # The scheduler's only jobs should be to adjust the learning rate and signal when to stop
+        # lr_before = optimizer.param_groups[0]["lr"]
+        # stop = scheduler.step(validation_loss)  # `step` might return a stop signal
+        # lr_after = optimizer.param_groups[0]["lr"]
+
+        # # 3. If LR was reduced, load the best model back
+        # if lr_after < lr_before:
+        #     load_model(model, optimizer, workspace=workspace)  # ()
 
         if stop:
             logger.info("--- Early stopping triggered at epoch %d ---", epoch + 1)
             break
 
     logger.info("--- Training finished. Loading best model for final evaluation. ---")
-    load_model(model, optimizer, workspace=workspace)  # ()
+    load_model(model, optimizer, workspace=workspace)()
     optimizer.swap()
 
     # validation_loss = -torch.stack(
@@ -281,7 +310,6 @@ def train(
             x_mb = x_mb.to(device)
             loss = -compute_log_p_x(model, x_mb).mean()
             validation_loss += loss.item()
-            del loss, x_mb
 
     validation_loss /= len(data_loader_valid)
 
@@ -292,7 +320,6 @@ def train(
             x_mb = x_mb.to(device)
             loss = -compute_log_p_x(model, x_mb).mean()
             test_loss += loss.item()
-            del loss, x_mb
 
     test_loss /= len(data_loader_test)
 
@@ -310,17 +337,17 @@ def train(
         test_loss,
     )
 
-    save_model(model, optimizer, epoch, "checkpoint.pt", save)
+    # save_model(model, optimizer, epoch, "checkpoint.pt", save)
 
-    # if save:
-    #     torch.save(
-    #         {
-    #             "model": model.state_dict(),
-    #             "optimizer": optimizer.state_dict(),
-    #             "epoch": epoch,
-    #         },
-    #         workspace / "checkpoint.pt",
-    #     )  # nosec B614
+    if save:
+        torch.save(
+            {
+                "model": model.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "epoch": epoch,
+            },
+            workspace / "checkpoint.pt",
+        )  # nosec B614
     # logger.info(
     #     "###### Stop training after %d epochs!\nValidation loss: %.3f\nTest loss: %.3f",
     #     epoch + 1,
@@ -395,13 +422,13 @@ def density_estimator_trainer(
         patience=patience,
         cooldown=cooldown,
         min_lr=min_lr,
-        # verbose=True,
+        verbose=True,
         early_stopping=early_stopping,
         threshold_mode="abs",
     )
 
     if load:
-        load_model(model, optimizer, workspace=workspace)  # ()
+        load_model(model, optimizer, workspace=workspace)()
 
     logger.info("Training..")
     p_func = train(
@@ -453,7 +480,7 @@ class DomiasMIABNAF:
             dataloader = torch.utils.data.DataLoader(
                 dataset, batch_size=self.batch_size, shuffle=False
             )
-            for (x_mb,) in dataloader:
+            for (x_mb,) in tqdm(dataloader):
                 x_mb = x_mb.to(self.device)
                 log_p_x = compute_log_p_x(model, x_mb)
                 log_p_x_all.append(log_p_x.cpu().numpy())
