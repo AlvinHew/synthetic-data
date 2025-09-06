@@ -114,17 +114,21 @@ def load_model(
     optimizer: Any,
     workspace: Path = Path("workspace"),
 ) -> Callable:
-    def f() -> None:
-        if workspace.exists():
-            return
+    # def f() -> None:
+    if workspace.exists():
+        return
 
-        logger.info("Loading model..")
-        if (workspace / "checkpoint.pt").exists():
-            checkpoint = torch.load(workspace / "checkpoint.pt")  # nosec B614
-            model.load_state_dict(checkpoint["model"])
-            optimizer.load_state_dict(checkpoint["optimizer"])
+    path = workspace / "checkpoint.pt"
+    logger.info("Loading checkpoint model from ")
 
-    return f
+    if path.exists():
+        checkpoint = torch.load(path)  # nosec B614
+        model.load_state_dict(checkpoint["model"])
+        optimizer.load_state_dict(checkpoint["optimizer"])
+    else:
+        logger.warning("No checkpoint found.")
+
+    # return f
 
 
 def save_model(
@@ -136,19 +140,19 @@ def save_model(
 ) -> Callable:
     workspace.mkdir(parents=True, exist_ok=True)
 
-    def f() -> None:
-        if save:
-            logger.info("Saving model..")
-            torch.save(
-                {
-                    "model": model.state_dict(),
-                    "optimizer": optimizer.state_dict(),
-                    "epoch": epoch,
-                },
-                workspace / "DomiasMIA_bnaf_checkpoint.pt",
-            )  # nosec B614
+    # def f() -> None:
+    if save:
+        logger.info("Saving model..")
+        torch.save(
+            {
+                "model": model.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "epoch": epoch,
+            },
+            workspace / "DomiasMIA_bnaf_checkpoint.pt",
+        )  # nosec B614
 
-    return f
+    # return f
 
 
 def train(
@@ -167,6 +171,8 @@ def train(
 ) -> Callable:
 
     epoch = start_epoch
+    best_validation_loss = float("inf")
+
     for epoch in range(start_epoch, start_epoch + epochs):
         model.train()
         t = tqdm(data_loader_train, smoothing=0, ncols=80, disable=False)  # True)
@@ -211,29 +217,46 @@ def train(
         validation_loss /= len(data_loader_valid)
         optimizer.swap()
 
+        # Use lazy formatting, defers string formatting unless the log level is enabled, saving compute and memory
         logger.info(
-            "Epoch {:3}/{:3} -- train_loss: {:4.3f} -- validation_loss: {:4.3f}".format(
-                epoch + 1,
-                start_epoch + epochs,
-                train_loss,  # .item(),
-                validation_loss,  # .item(),
-            )
+            "Epoch %3d/%3d -- train_loss: %4.3f -- validation_loss: %4.3f",
+            epoch + 1,
+            start_epoch + epochs,
+            train_loss,
+            validation_loss,
         )
 
-        stop = scheduler.step(
-            validation_loss,
-            callback_best=save_model(
-                model, optimizer, epoch + 1, save=save, workspace=workspace
-            ),
-            callback_reduce=load_model(model, optimizer, workspace=workspace),
-        )
+        # stop = scheduler.step(
+        #     validation_loss,
+        #     callback_best=save_model(
+        #         model, optimizer, epoch + 1, save=save, workspace=workspace
+        #     ),
+        #     callback_reduce=load_model(model, optimizer, workspace=workspace),
+        # )
+
+        if validation_loss < best_validation_loss:
+            best_validation_loss = validation_loss
+            if save:
+                save_model(model, optimizer, epoch + 1)
+
+        # 2. Let the scheduler decide to change LR or stop
+        # Assumes a scheduler API like `ReduceLROnPlateau`. The `stop` signal
+        # and `callback_reduce` logic from the original code are now handled here.
+        # The scheduler's only jobs should be to adjust the learning rate and signal when to stop
+        lr_before = optimizer.param_groups[0]["lr"]
+        stop = scheduler.step(validation_loss)  # `step` might return a stop signal
+        lr_after = optimizer.param_groups[0]["lr"]
+
+        # 3. If LR was reduced, load the best model back
+        if lr_after < lr_before:
+            load_model(model, optimizer)
 
         if stop:
-            logger.info(f"--- Early stopping triggered at epoch {epoch + 1} ---")
+            logger.info("--- Early stopping triggered at epoch %d ---", epoch + 1)
             break
 
     logger.info("--- Training finished. Loading best model for final evaluation. ---")
-    load_model(model, optimizer, workspace=workspace)()
+    load_model(model, optimizer, workspace=workspace)  # ()
     optimizer.swap()
 
     # validation_loss = -torch.stack(
@@ -273,11 +296,10 @@ def train(
     #     """
     # )
     logger.info(
-        f"""
-        ###### Stop training after {epoch + 1} epochs!
-        Validation loss: {validation_loss:4.3f}
-        Test loss:       {test_loss:4.3f}
-        """
+        "###### Stop training after %d epochs!\nValidation loss: %.3f\nTest loss: %.3f",
+        epoch + 1,
+        validation_loss,
+        test_loss,
     )
 
     if save:
@@ -290,11 +312,10 @@ def train(
             workspace / "checkpoint.pt",
         )  # nosec B614
         logger.info(
-            f"""
-            ###### Stop training after {epoch + 1} epochs!
-            Validation loss: {validation_loss:4.3f}
-            Test loss:       {test_loss:4.3f}
-            """
+            "###### Stop training after %d epochs!\nValidation loss: %.3f\nTest loss: %.3f",
+            epoch + 1,
+            validation_loss,
+            test_loss,
         )
 
     def p_func(x: np.ndarray) -> np.ndarray:
