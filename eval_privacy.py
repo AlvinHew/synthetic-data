@@ -391,7 +391,7 @@ def density_estimator_trainer(
     )
 
     if load:
-        load_model(model, optimizer, workspace=workspace)()
+        load_model(model, optimizer, workspace=workspace)  # ()
 
     logger.info("Training..")
     p_func = train(
