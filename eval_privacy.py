@@ -411,7 +411,9 @@ def density_estimator_trainer(
 
     logger.info("Creating optimizer..")
     optimizer = bnaf.Adam(
-        model.parameters(), lr=learning_rate, amsgrad=True, polyak=polyak
+        model.parameters(),
+        lr=learning_rate,
+        amsgrad=True,  # polyak=polyak
     )
 
     logger.info("Creating scheduler..")
