@@ -8,9 +8,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from tqdm import tqdm
 
 import bnaf
+
+# from tqdm import tqdm
+
 
 logger = logging.getLogger(__name__)
 
@@ -202,15 +204,16 @@ def train(
 ) -> Callable:
 
     # epoch = start_epoch
-    best_epoch = start_epoch
-    best_val_loss = float("inf")
+    # best_epoch = start_epoch
+    # best_val_loss = float("inf")
 
     for epoch in range(start_epoch, start_epoch + epochs):
         model.train()
         running_train_loss = 0.0
-        t = tqdm(data_loader_train, smoothing=0, ncols=80, disable=False)  # True)
+        # t = tqdm(data_loader_train, smoothing=0, ncols=80, disable=False)  # True)
         # train_loss: torch.Tensor = []
-        for (x_mb,) in t:
+        # for (x_mb,) in t:
+        for (x_mb,) in data_loader_train:
             x_mb = x_mb.to(device)
             loss = -compute_log_p_x(model, x_mb).mean()
 
@@ -220,7 +223,7 @@ def train(
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)  # More memory efficient
 
-            t.set_postfix(loss="{:.2f}".format(loss.item()), refresh=False)
+            # t.set_postfix(loss="{:.2f}".format(loss.item()), refresh=False)
             # train_loss.append(loss)
             running_train_loss += loss.item()
 
@@ -381,7 +384,7 @@ def density_estimator_trainer(
     epochs: int = 50,
     learning_rate: float = 1e-2,
     clip_norm: float = 0.1,
-    polyak: float = 0.998,
+    # polyak: float = 0.998,
     save: bool = True,
     load: bool = True,
 ) -> Tuple[Callable, nn.Module]:
@@ -465,6 +468,9 @@ class DomiasMIABNAF:
         self.batch_size = kwargs.pop("batch_size", 50)
         self.device = kwargs.pop("device", DEVICE)
         self.epochs = kwargs.pop("epochs", 50)
+        self.patience = kwargs.pop("patience", 20)
+        self.cooldown = kwargs.pop("cooldown", 10)
+        self.early_stopping = kwargs.pop("early_stopping", 100)
         super().__init__(**kwargs)
 
     @staticmethod
@@ -482,7 +488,8 @@ class DomiasMIABNAF:
             dataloader = torch.utils.data.DataLoader(
                 dataset, batch_size=self.batch_size, shuffle=False
             )
-            for (x_mb,) in tqdm(dataloader):
+            # for (x_mb,) in tqdm(dataloader):
+            for (x_mb,) in dataloader:
                 x_mb = x_mb.to(self.device)
                 log_p_x = compute_log_p_x(model, x_mb)
                 log_p_x_all.append(log_p_x.cpu().numpy())
@@ -502,6 +509,9 @@ class DomiasMIABNAF:
             synth_set.values,
             synth_val_set.values[: int(0.5 * synth_val_set.shape[0])],
             synth_val_set.values[int(0.5 * synth_val_set.shape[0]) :],
+            patience=self.patience,
+            cooldown=self.cooldown,
+            early_stopping=self.early_stopping,
             batch_dim=self.batch_size,
             device=self.device,
             epochs=self.epochs,
@@ -512,12 +522,15 @@ class DomiasMIABNAF:
         #     .detach()
         #     .numpy()
         # )
-        p_G_evaluated = np.exp(self._compute_log_p_x_in_batches(p_G_model, X_test))
+        log_p_G_evaluated = self._compute_log_p_x_in_batches(p_G_model, X_test)
         del p_G_model
         logger.info("Finished evaluating p_G.")
 
         _, p_R_model = density_estimator_trainer(
             reference_set,
+            patience=self.patience,
+            cooldown=self.cooldown,
+            early_stopping=self.early_stopping,
             batch_dim=self.batch_size,
             device=self.device,
             epochs=self.epochs,
@@ -528,10 +541,12 @@ class DomiasMIABNAF:
         #     .detach()
         #     .numpy()
         # )
-        p_R_evaluated = np.exp(self._compute_log_p_x_in_batches(p_R_model, X_test))
+        # p_R_evaluated = np.exp(self._compute_log_p_x_in_batches(p_R_model, X_test))
+        log_p_R_evaluated = self._compute_log_p_x_in_batches(p_R_model, X_test)
         del p_R_model
         logger.info("Finished evaluating p_R.")
 
-        p_rel = p_G_evaluated / (p_R_evaluated + 1e-10)
+        # p_rel = p_G_evaluated / (p_R_evaluated + 1e-10)
+        p_rel = np.exp(log_p_G_evaluated - log_p_R_evaluated)
 
         return p_rel
