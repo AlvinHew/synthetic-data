@@ -427,7 +427,6 @@ def density_estimator_trainer(
         patience=patience,
         cooldown=cooldown,
         min_lr=min_lr,
-        verbose=True,
         early_stopping=early_stopping,
         threshold_mode="abs",
     )
