@@ -229,7 +229,7 @@ def train(
 
         # train_loss = torch.stack(train_loss).mean()
         train_loss = running_train_loss / len(data_loader_train)
-        # optimizer.swap()  # swap to EMA (polyak) weights for evaluation
+        optimizer.swap()  # swap to EMA (polyak) weights for evaluation
         # validation_loss = -torch.stack(
         #     [
         #         compute_log_p_x(model, x_mb).mean().detach()
@@ -246,7 +246,7 @@ def train(
                 validation_loss += loss.item()
 
             validation_loss /= len(data_loader_valid)
-        # optimizer.swap()  # swap back to raw weights for next training epoch
+        optimizer.swap()  # swap back to raw weights for next training epoch
 
         # Use lazy formatting, defers string formatting unless the log level is enabled, saving compute and memory
         logger.info(
@@ -298,7 +298,7 @@ def train(
 
     logger.info("--- Training finished. Loading best model for final evaluation. ---")
     load_model(model, optimizer, workspace=workspace)  # ()
-    # optimizer.swap()
+    optimizer.swap()
 
     # validation_loss = -torch.stack(
     #     [compute_log_p_x(model, x_mb).mean().detach() for x_mb, in data_loader_valid],
