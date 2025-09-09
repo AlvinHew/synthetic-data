@@ -7,6 +7,8 @@ from typing import Any, Callable, List, Optional, Tuple, Union
 import numpy as np
 import torch
 import torch.nn as nn
+from geomloss import SamplesLoss
+from sklearn.preprocessing import MinMaxScaler
 from torch.utils.data import DataLoader
 
 import bnaf
@@ -17,6 +19,29 @@ import bnaf
 logger = logging.getLogger(__name__)
 
 DEVICE = "cpu"
+
+
+def compute_wd(
+    X_syn: np.ndarray,
+    X: np.ndarray,
+) -> float:
+    X_ = X.copy()
+    X_syn_ = X_syn.copy()
+    if len(X_) > len(X_syn_):
+        X_syn_ = np.concatenate(
+            [X_syn_, np.zeros((len(X_) - len(X_syn_), X_.shape[1]))]
+        )
+
+    scaler = MinMaxScaler().fit(X_)
+
+    X_ = scaler.transform(X_)
+    X_syn_ = scaler.transform(X_syn_)
+
+    X_ten = torch.from_numpy(X_).reshape(-1, 1)
+    Xsyn_ten = torch.from_numpy(X_syn_).reshape(-1, 1)
+    OT_solver = SamplesLoss(loss="sinkhorn")
+
+    return OT_solver(X_ten, Xsyn_ten).cpu().numpy().item()
 
 
 # BNAF for Domias
@@ -501,8 +526,7 @@ class DomiasMIABNAF:
         synth_val_set: Union[DataLoader, Any],
         reference_set: np.ndarray,
         X_test: np.ndarray,
-        # batch_size: int = 50,
-        # device: Any = DEVICE,
+        return_log_p: bool = False,
     ) -> Tuple[np.ndarray, np.ndarray]:
         _, p_G_model = density_estimator_trainer(
             synth_set.values,
@@ -548,4 +572,7 @@ class DomiasMIABNAF:
         # p_rel = p_G_evaluated / (p_R_evaluated + 1e-10)
         p_rel = np.exp(log_p_G_evaluated - log_p_R_evaluated)
 
-        return p_rel
+        if return_log_p:
+            return p_rel, log_p_G_evaluated, log_p_R_evaluated
+        else:
+            return p_rel
